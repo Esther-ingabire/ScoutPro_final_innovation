@@ -62,7 +62,7 @@ public class Athlete extends BaseEntity {
         this.active = true;
     }
 
-    
+
 
     public String getAthleteCode() {
         return athleteCode;
