@@ -13,4 +13,5 @@ public interface AthleteRepository extends JpaRepository<Athlete, UUID> {
     boolean existsByAthleteCode(String athleteCode);
     Optional<Athlete> findByUserId(UUID userId);              // athlete sees own profile
     Page<Athlete> findBySportId(UUID sportId, Pageable pageable);
+    boolean existsBySportId(UUID sportId);
 }
