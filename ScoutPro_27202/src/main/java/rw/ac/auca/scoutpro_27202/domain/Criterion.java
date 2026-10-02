@@ -25,7 +25,7 @@ public class Criterion extends BaseEntity {
         this.sport = sport;
     }
 
-    
+
 
     public String getName() {
         return name;
