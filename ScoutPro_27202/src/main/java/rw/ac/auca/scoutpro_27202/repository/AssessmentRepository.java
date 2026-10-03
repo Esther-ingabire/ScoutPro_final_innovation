@@ -10,12 +10,15 @@ import java.util.UUID;
 
 public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
-    // US1: same-day rule, checked before saving to return a clear 422
+    // US1: same-day rule
     boolean existsByScoutIdAndAthleteIdAndAssessmentDate(UUID scoutId, UUID athleteId, LocalDate date);
 
-    // athlete profile: assessment history, newest first
+    // athlete profile: history, newest first
     Page<Assessment> findByAthleteIdOrderByAssessmentDateDesc(UUID athleteId, Pageable pageable);
 
-    // FR6: simple ranking, highest overall score first
+    // simple ranking, highest score first
     Page<Assessment> findAllByOrderByOverallScoreDesc(Pageable pageable);
+
+    // can an athlete be deleted?
+    boolean existsByAthleteId(UUID athleteId);
 }
