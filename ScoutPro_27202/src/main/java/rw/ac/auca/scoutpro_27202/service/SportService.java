@@ -2,6 +2,7 @@ package rw.ac.auca.scoutpro_27202.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Sport;
@@ -29,6 +30,7 @@ public class SportService {
     private AthleteRepository athleteRepo;
 
     // CREATE
+    @PreAuthorize("hasRole('ADMIN')")   // RBAC: only admins manage sports
     public Sport saveSport(Sport sport) {
         if (sport.getName() == null || sport.getName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sport name is required");
@@ -45,20 +47,21 @@ public class SportService {
         return sportRepo.save(sport);
     }
 
-    // READ all
+    // READ all (any logged-in user)
     public List<Sport> getAllSports() {
         return sportRepo.findAll();
     }
 
-    // READ one
+    // READ one (any logged-in user)
     public Sport getSportById(UUID id) {
         return sportRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sport not found"));
     }
 
     // UPDATE
+    @PreAuthorize("hasRole('ADMIN')")   // RBAC
     public Sport updateSport(UUID id, Sport newData) {
-        Sport existing = getSportById(id);   // throws 404 if missing
+        Sport existing = getSportById(id);
 
         if (newData.getName() == null || newData.getName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sport name is required");
@@ -79,6 +82,7 @@ public class SportService {
     }
 
     // DELETE
+    @PreAuthorize("hasRole('ADMIN')")   // RBAC
     public void deleteSport(UUID id) {
         if (!sportRepo.existsById(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Sport not found");

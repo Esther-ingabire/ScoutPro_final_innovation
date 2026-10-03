@@ -2,6 +2,7 @@ package rw.ac.auca.scoutpro_27202.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Criterion;
@@ -25,8 +26,9 @@ public class CriterionService {
     private SportService sportService;
 
     // CREATE
+    @PreAuthorize("hasRole('ADMIN')")   // RBAC: only admins manage criteria
     public Criterion saveCriterion(UUID sportId, Criterion criterion) {
-        Sport sport = sportService.getSportById(sportId);   // 404 if sport doesn't exist
+        Sport sport = sportService.getSportById(sportId);
         validate(criterion);
 
         String name = criterion.getName().trim();
@@ -40,19 +42,20 @@ public class CriterionService {
         return criterionRepo.save(criterion);
     }
 
-    // READ all criteria of one sport
+    // READ all criteria of one sport (any logged-in user; scouts need these to score)
     public List<Criterion> getCriteriaBySport(UUID sportId) {
-        sportService.getSportById(sportId);                 // 404 if sport doesn't exist
+        sportService.getSportById(sportId);
         return criterionRepo.findBySportId(sportId);
     }
 
-    // READ one
+    // READ one (any logged-in user)
     public Criterion getCriterionById(UUID id) {
         return criterionRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Criterion not found"));
     }
 
-    // UPDATE (name and weight only, a criterion can't move to another sport)
+    // UPDATE
+    @PreAuthorize("hasRole('ADMIN')")   // RBAC
     public Criterion updateCriterion(UUID id, Criterion newData) {
         Criterion existing = getCriterionById(id);
         validate(newData);
@@ -72,6 +75,7 @@ public class CriterionService {
     }
 
     // DELETE
+    @PreAuthorize("hasRole('ADMIN')")   // RBAC
     public void deleteCriterion(UUID id) {
         if (!criterionRepo.existsById(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Criterion not found");
@@ -83,7 +87,6 @@ public class CriterionService {
         criterionRepo.deleteById(id);
     }
 
-    // shared checks for create and update
     private void validate(Criterion criterion) {
         if (criterion.getName() == null || criterion.getName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Criterion name is required");
