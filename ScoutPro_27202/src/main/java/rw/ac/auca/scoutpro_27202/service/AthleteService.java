@@ -9,13 +9,16 @@ import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Athlete;
 import rw.ac.auca.scoutpro_27202.domain.Sport;
 import rw.ac.auca.scoutpro_27202.domain.Team;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
 import rw.ac.auca.scoutpro_27202.repository.AthleteRepository;
 import rw.ac.auca.scoutpro_27202.repository.PhysicalProfileRepository;
 import rw.ac.auca.scoutpro_27202.repository.ShortlistRepository;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -39,8 +42,11 @@ public class AthleteService {
     @Autowired
     private TeamService teamService;
 
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
+
     // CREATE
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")   // RBAC: scouts register athletes
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     public Athlete saveAthlete(UUID sportId, UUID teamId, Athlete athlete) {
         Sport sport = sportService.getSportById(sportId);
         validate(athlete);
@@ -58,20 +64,20 @@ public class AthleteService {
     }
 
     // READ all
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")   // RBAC
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
     public List<Athlete> getAllAthletes() {
         return athleteRepo.findAll();
     }
 
     // READ one
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")   // RBAC
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
     public Athlete getAthleteById(UUID id) {
         return athleteRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Athlete not found"));
     }
 
     // UPDATE
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")   // RBAC
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     public Athlete updateAthlete(UUID id, UUID teamId, Athlete newData) {
         Athlete existing = getAthleteById(id);
         validate(newData);
@@ -93,15 +99,23 @@ public class AthleteService {
     }
 
     // DEACTIVATE
-    @PreAuthorize("hasRole('ADMIN')")   // RBAC: matrix says admin deactivates
+    @PreAuthorize("hasRole('ADMIN')")
     public Athlete deactivateAthlete(UUID id) {
         Athlete athlete = getAthleteById(id);
         athlete.setActive(false);
-        return athleteRepo.save(athlete);
+        Athlete saved = athleteRepo.save(athlete);
+
+        // EVENT: inform scouts and write to audit log
+        Map<String, String> data = new HashMap<>();
+        data.put("athleteId", saved.getId().toString());
+        data.put("athleteName", saved.getFullName());
+        eventPublisher.publish("athlete.deactivated", data);
+
+        return saved;
     }
 
     // DELETE
-    @PreAuthorize("hasRole('ADMIN')")   // RBAC
+    @PreAuthorize("hasRole('ADMIN')")
     @Transactional
     public void deleteAthlete(UUID id) {
         if (!athleteRepo.existsById(id)) {
