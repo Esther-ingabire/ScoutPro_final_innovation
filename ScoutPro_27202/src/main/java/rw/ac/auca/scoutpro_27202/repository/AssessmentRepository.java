@@ -21,4 +21,6 @@ public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
     // can an athlete be deleted?
     boolean existsByAthleteId(UUID athleteId);
+
+    boolean existsByScoutId(UUID scoutId);   // can a scout be deleted?
 }
