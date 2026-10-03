@@ -2,6 +2,7 @@ package rw.ac.auca.scoutpro_27202.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Athlete;
@@ -20,12 +21,12 @@ public class PhysicalProfileService {
     @Autowired
     private AthleteService athleteService;
 
-    // CREATE or UPDATE: one profile per athlete
+    // CREATE or UPDATE
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")   // RBAC: scouts measure athletes
     public PhysicalProfile saveOrUpdateProfile(UUID athleteId, PhysicalProfile data) {
-        Athlete athlete = athleteService.getAthleteById(athleteId);   // 404 if athlete missing
+        Athlete athlete = athleteService.getAthleteById(athleteId);
         validate(data);
 
-        // existing profile if the athlete has one, otherwise a new one
         PhysicalProfile profile = profileRepo.findByAthleteId(athleteId)
                 .orElse(new PhysicalProfile());
 
@@ -38,14 +39,14 @@ public class PhysicalProfileService {
     }
 
     // READ
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")   // RBAC
     public PhysicalProfile getProfileByAthlete(UUID athleteId) {
-        athleteService.getAthleteById(athleteId);                     // 404 if athlete missing
+        athleteService.getAthleteById(athleteId);
         return profileRepo.findByAthleteId(athleteId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "This athlete has no physical profile yet"));
     }
 
-    // realistic ranges catch typos like 1800 cm or a weight in pounds
     private void validate(PhysicalProfile p) {
         if (p.getHeightCm() == null || p.getHeightCm() < 50 || p.getHeightCm() > 250) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
