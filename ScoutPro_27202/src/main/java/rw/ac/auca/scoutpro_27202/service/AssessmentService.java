@@ -15,7 +15,9 @@ import rw.ac.auca.scoutpro_27202.dto.ScoreRequest;
 import rw.ac.auca.scoutpro_27202.dto.ScoreResponse;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
 import rw.ac.auca.scoutpro_27202.repository.CriterionRepository;
+import rw.ac.auca.scoutpro_27202.repository.ScoutingReportRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
+import rw.ac.auca.scoutpro_27202.repository.ScoutingReportRepository;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -26,6 +28,10 @@ public class AssessmentService {
 
     @Autowired
     private AssessmentRepository assessmentRepo;
+
+
+    @Autowired
+    private ScoutingReportRepository reportRepo;
 
     @Autowired
     private CriterionRepository criterionRepo;
@@ -158,6 +164,7 @@ public class AssessmentService {
         Assessment assessment = findAssessment(id);
         checkCanModify(assessment);
         assessmentRepo.delete(assessment);
+        reportRepo.deleteByAssessmentId(id.toString());   // MongoDB has no cascade from Postgres
     }
 
     // ---------- helpers ----------
