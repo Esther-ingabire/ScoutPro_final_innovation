@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface AssessmentScoreRepository extends JpaRepository<AssessmentScore, UUID> {
     List<AssessmentScore> findByAssessmentId(UUID assessmentId);
+    boolean existsByCriterionId(UUID criterionId);
 }

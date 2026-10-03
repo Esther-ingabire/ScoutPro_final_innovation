@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface TeamRepository extends JpaRepository<Team, UUID> {
     List<Team> findBySportId(UUID sportId);
+    boolean existsBySportId(UUID sportId);
 }
