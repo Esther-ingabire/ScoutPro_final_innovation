@@ -8,7 +8,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface CriterionRepository extends JpaRepository<Criterion, UUID> {
-    List<Criterion> findBySportId(UUID sportId);              // FR4: criteria to score
-    boolean existsBySportIdAndName(UUID sportId, String name);
-    Optional<Criterion> findBySportIdAndNameIgnoreCase(UUID sportId, String name);
+
+    List<Criterion> findBySportId(UUID sportId);                                // list a sport's criteria
+
+    Optional<Criterion> findBySportIdAndNameIgnoreCase(UUID sportId, String name); // duplicate check
+
+    boolean existsBySportId(UUID sportId);                                      // can a sport be deleted?
 }
