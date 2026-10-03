@@ -1,6 +1,8 @@
 package rw.ac.auca.scoutpro_27202.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+
 
 import java.util.HashSet;
 import java.util.Set;
@@ -13,6 +15,7 @@ public class User extends BaseEntity {
     private String email;
 
     // null for users who sign in with Google
+    @JsonIgnore
     private String password;
 
     @Enumerated(EnumType.STRING)
