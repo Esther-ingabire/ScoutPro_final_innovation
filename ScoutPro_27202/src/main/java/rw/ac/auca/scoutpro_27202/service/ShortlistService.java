@@ -12,11 +12,14 @@ import rw.ac.auca.scoutpro_27202.domain.User;
 import rw.ac.auca.scoutpro_27202.dto.ShortlistAthleteResponse;
 import rw.ac.auca.scoutpro_27202.dto.ShortlistRequest;
 import rw.ac.auca.scoutpro_27202.dto.ShortlistResponse;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
 import rw.ac.auca.scoutpro_27202.repository.ShortlistRepository;
 import rw.ac.auca.scoutpro_27202.repository.UserRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -33,6 +36,9 @@ public class ShortlistService {
 
     @Autowired
     private CurrentUser currentUser;
+
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
 
     // CREATE: the owner is whoever is logged in
     @PreAuthorize("hasAnyRole('ADMIN', 'CLUB_MANAGER')")
@@ -77,7 +83,6 @@ public class ShortlistService {
         Shortlist shortlist = findAccessibleShortlist(id);
         String name = validateName(request);
 
-        // renaming to a name this owner already uses for another list
         boolean nameChanged = !shortlist.getName().equals(name);
         if (nameChanged && shortlistRepo.existsByOwnerIdAndName(shortlist.getOwner().getId(), name)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -118,7 +123,15 @@ public class ShortlistService {
         shortlist.getAthletes().add(athlete);
         Shortlist saved = shortlistRepo.save(shortlist);
 
-        // TODO (RabbitMQ branch): publish "shortlist.athleteadded" so the athlete gets email + SMS
+        // EVENT: athlete receives email + SMS (US2), sent only after the transaction commits
+        Map<String, String> data = new HashMap<>();
+        data.put("shortlistName", shortlist.getName());
+        data.put("athleteId", athlete.getId().toString());
+        data.put("athleteName", athlete.getFullName());
+        data.put("athleteEmail", athlete.getUser() != null ? athlete.getUser().getEmail() : null);
+        data.put("athletePhone", athlete.getContactNumber());
+        data.put("managerEmail", shortlist.getOwner().getEmail());
+        eventPublisher.publish("shortlist.athleteadded", data);
 
         return toResponse(saved);
     }
