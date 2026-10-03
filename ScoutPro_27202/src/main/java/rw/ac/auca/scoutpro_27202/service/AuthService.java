@@ -11,9 +11,13 @@ import rw.ac.auca.scoutpro_27202.domain.User;
 import rw.ac.auca.scoutpro_27202.dto.AuthResponse;
 import rw.ac.auca.scoutpro_27202.dto.LoginRequest;
 import rw.ac.auca.scoutpro_27202.dto.RegisterRequest;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
 import rw.ac.auca.scoutpro_27202.repository.RoleRepository;
 import rw.ac.auca.scoutpro_27202.repository.UserRepository;
 import rw.ac.auca.scoutpro_27202.security.JwtService;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 public class AuthService {
@@ -29,6 +33,9 @@ public class AuthService {
 
     @Autowired
     private JwtService jwtService;
+
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
 
     // REGISTER: every self-registered user starts as ATHLETE; an admin can grant other roles
     public AuthResponse register(RegisterRequest request) {
@@ -50,6 +57,12 @@ public class AuthService {
         user.getRoles().add(athleteRole);
         userRepo.save(user);
 
+        // EVENT: welcome email
+        Map<String, String> data = new HashMap<>();
+        data.put("userId", user.getId().toString());
+        data.put("email", user.getEmail());
+        eventPublisher.publish("user.registered", data);
+
         return buildResponse(user);
     }
 
@@ -61,9 +74,9 @@ public class AuthService {
 
         User user = userRepo.findByEmail(request.email().trim().toLowerCase()).orElse(null);
 
-        // same message whether the email or the password is wrong (see note below)
+        // same message whether the email or the password is wrong
         if (user == null
-                || user.getPassword() == null                          // Google-only account
+                || user.getPassword() == null
                 || !passwordEncoder.matches(request.password(), user.getPassword())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
         }

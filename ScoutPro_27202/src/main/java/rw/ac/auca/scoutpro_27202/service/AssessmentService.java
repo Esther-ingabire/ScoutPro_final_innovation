@@ -13,11 +13,11 @@ import rw.ac.auca.scoutpro_27202.dto.AssessmentRequest;
 import rw.ac.auca.scoutpro_27202.dto.AssessmentResponse;
 import rw.ac.auca.scoutpro_27202.dto.ScoreRequest;
 import rw.ac.auca.scoutpro_27202.dto.ScoreResponse;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
 import rw.ac.auca.scoutpro_27202.repository.CriterionRepository;
 import rw.ac.auca.scoutpro_27202.repository.ScoutingReportRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
-import rw.ac.auca.scoutpro_27202.repository.ScoutingReportRepository;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -29,12 +29,11 @@ public class AssessmentService {
     @Autowired
     private AssessmentRepository assessmentRepo;
 
+    @Autowired
+    private CriterionRepository criterionRepo;
 
     @Autowired
     private ScoutingReportRepository reportRepo;
-
-    @Autowired
-    private CriterionRepository criterionRepo;
 
     @Autowired
     private AthleteService athleteService;
@@ -44,6 +43,9 @@ public class AssessmentService {
 
     @Autowired
     private CurrentUser currentUser;
+
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
 
     // CREATE: only scouts record assessments (US1)
     @PreAuthorize("hasRole('SCOUT')")
@@ -70,7 +72,7 @@ public class AssessmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Assessment date can't be in the future");
         }
 
-        // 4. same-day rule (US1): one assessment per scout, per athlete, per day
+        // 4. same-day rule (US1)
         if (assessmentRepo.existsByScoutIdAndAthleteIdAndAssessmentDate(scout.getId(), athlete.getId(), date)) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "You already assessed this athlete on " + date);
@@ -91,10 +93,21 @@ public class AssessmentService {
         try {
             assessmentRepo.saveAndFlush(assessment);
         } catch (DataIntegrityViolationException e) {
-            // two identical requests at the same instant: the DB unique constraint caught the second
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "You already assessed this athlete on " + date);
         }
+
+        // EVENT: email the athlete a summary + audit log (sent only after commit)
+        Map<String, String> data = new HashMap<>();
+        data.put("assessmentId", assessment.getId().toString());
+        data.put("athleteId", athlete.getId().toString());
+        data.put("athleteName", athlete.getFullName());
+        data.put("athleteEmail", athlete.getUser() != null ? athlete.getUser().getEmail() : null);
+        data.put("scoutName", scout.getFullName());
+        data.put("overallScore", String.valueOf(assessment.getOverallScore()));
+        data.put("assessmentDate", date.toString());
+        eventPublisher.publish("assessment.created", data);
+
         return toResponse(assessment);
     }
 
@@ -109,7 +122,7 @@ public class AssessmentService {
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
     @Transactional(readOnly = true)
     public List<AssessmentResponse> getAthleteHistory(UUID athleteId, int page, int size) {
-        athleteService.getAthleteById(athleteId);   // 404 if the athlete doesn't exist
+        athleteService.getAthleteById(athleteId);
         return assessmentRepo
                 .findByAthleteIdOrderByAssessmentDateDesc(athleteId, PageRequest.of(page, Math.min(size, 100)))
                 .getContent().stream()
@@ -117,7 +130,7 @@ public class AssessmentService {
                 .toList();
     }
 
-    // READ ranking: highest overall score first (simple version)
+    // READ ranking: highest overall score first
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
     @Transactional(readOnly = true)
     public List<AssessmentResponse> getRanking(int page, int size) {
@@ -138,7 +151,6 @@ public class AssessmentService {
         List<Criterion> criteria = criterionRepo.findBySportId(assessment.getAthlete().getSport().getId());
         Map<UUID, Double> scores = validateScores(request.scores(), criteria);
 
-        // change existing score rows in place; add rows only for criteria added since
         Map<UUID, AssessmentScore> existing = new HashMap<>();
         for (AssessmentScore s : assessment.getScores()) {
             existing.put(s.getCriterion().getId(), s);
@@ -157,7 +169,7 @@ public class AssessmentService {
         return toResponse(assessmentRepo.save(assessment));
     }
 
-    // DELETE: admin, or the scout who made it (scores are deleted by cascade)
+    // DELETE: admin, or the scout who made it
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     @Transactional
     public void deleteAssessment(UUID id) {
@@ -174,7 +186,6 @@ public class AssessmentService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Assessment not found"));
     }
 
-    // ownership: admins can modify any assessment, scouts only their own
     private void checkCanModify(Assessment assessment) {
         if (currentUser.hasRole("ADMIN")) {
             return;
@@ -185,7 +196,6 @@ public class AssessmentService {
         }
     }
 
-    // every criterion of the sport scored exactly once, 0–100, nothing from other sports
     private Map<UUID, Double> validateScores(List<ScoreRequest> input, List<Criterion> criteria) {
         if (criteria.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
@@ -211,7 +221,6 @@ public class AssessmentService {
             }
         }
 
-        // US1: name the missing criteria
         List<String> missing = criteria.stream()
                 .filter(c -> !scores.containsKey(c.getId()))
                 .map(Criterion::getName)
@@ -223,7 +232,6 @@ public class AssessmentService {
         return scores;
     }
 
-    // FR5: overall = Σ(score × weight) ÷ Σ(weight), rounded to 2 decimals
     private double calculateOverall(Map<UUID, Double> scores, List<Criterion> criteria) {
         double weightedSum = 0;
         double totalWeight = 0;
@@ -234,12 +242,10 @@ public class AssessmentService {
         return Math.round(weightedSum / totalWeight * 100) / 100.0;
     }
 
-    // e.g. ASM-3F2A9C1E
     private String generateCode() {
         return "ASM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
-    // entity → response DTO, built while the DB session is still open
     private AssessmentResponse toResponse(Assessment a) {
         List<ScoreResponse> scoreList = a.getScores().stream()
                 .map(s -> new ScoreResponse(
