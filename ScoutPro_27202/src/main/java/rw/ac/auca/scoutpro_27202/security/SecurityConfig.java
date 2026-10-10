@@ -16,6 +16,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
 import javax.crypto.SecretKey;
@@ -23,47 +24,58 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 
 @Configuration
-@EnableMethodSecurity      // allows @PreAuthorize on methods (step 3)
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Value("${jwt.secret}")
     private String jwtSecret;
 
-    // 1. Which requests need a token
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
+
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http,
+                                           OAuth2LoginSuccessHandler oAuth2SuccessHandler) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // a session exists ONLY during the Google handshake; the API itself uses JWTs
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**").permitAll()   // login and register are public
-                        .requestMatchers("/error").permitAll()            // so 404/409 messages aren't hidden behind 401
-                        .anyRequest().authenticated()                     // everything else needs a valid token
+                        .requestMatchers("/api/v1/auth/**").permitAll()            // password login/register
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll() // Google login flow
+                        .requestMatchers("/error").permitAll()
+                        .anyRequest().authenticated()
                 )
+                // Google login: on success, our handler issues the JWT
+                .oauth2Login(oauth -> oauth
+                        .successHandler(oAuth2SuccessHandler)
+                        .failureHandler((request, response, ex) ->
+                                response.sendRedirect(frontendUrl + "/login?error=oauth_failed"))
+                )
+                // every API request: validate our JWT
                 .oauth2ResourceServer(oauth -> oauth
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
-                );
+                )
+                // an API call without a token gets 401, not a redirect to Google's login page
+                .exceptionHandling(e -> e.authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint()));
+
         return http.build();
     }
 
-    // 2. How passwords are hashed
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
-    // 3. The secret key that signs and verifies tokens
     private SecretKey secretKey() {
         return new SecretKeySpec(jwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
     }
 
-    // creates tokens (used at login)
     @Bean
     public JwtEncoder jwtEncoder() {
         return new NimbusJwtEncoder(new ImmutableSecret<>(secretKey()));
     }
 
-    // checks tokens (used on every request)
     @Bean
     public JwtDecoder jwtDecoder() {
         return NimbusJwtDecoder.withSecretKey(secretKey())
@@ -71,7 +83,6 @@ public class SecurityConfig {
                 .build();
     }
 
-    // 4. Turn the token's "roles" claim into Spring roles: ["SCOUT"] -> ROLE_SCOUT
     @Bean
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtGrantedAuthoritiesConverter rolesConverter = new JwtGrantedAuthoritiesConverter();

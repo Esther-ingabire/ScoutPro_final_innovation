@@ -1,0 +1,214 @@
+{
+  "info": {
+    "name": "ScoutPro API",
+    "description": "Checks for the Web Technology requirements: login, OAuth-protected resources, RBAC, pagination, and the databases behind sports (PostgreSQL) and reports (MongoDB).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "adminToken", "value": "" },
+    { "key": "scoutToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Admin login",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('admin login returns 200', function () { pm.response.to.have.status(200); });",
+                "const body = pm.response.json();",
+                "pm.test('admin token includes ADMIN', function () { pm.expect(body.roles).to.include('ADMIN'); });",
+                "pm.collectionVariables.set('adminToken', body.token);"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@scoutpro.rw\",\n  \"password\": \"Admin@12345\"\n}" },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Scout login",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('scout login returns 200', function () { pm.response.to.have.status(200); });",
+                "const body = pm.response.json();",
+                "pm.test('scout token includes SCOUT', function () { pm.expect(body.roles).to.include('SCOUT'); });",
+                "pm.collectionVariables.set('scoutToken', body.token);"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"scout1@test.rw\",\n  \"password\": \"Password1\"\n}" },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Short password is rejected",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('register rejects a short password', function () { pm.response.to.have.status(400); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"short@test.rw\",\n  \"password\": \"123\"\n}" },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected resources",
+      "item": [
+        {
+          "name": "Sports without a token",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('missing token is 401', function () { pm.response.to.have.status(401); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": { "method": "GET", "url": "{{baseUrl}}/sports?page=0&size=20" }
+        },
+        {
+          "name": "Sports as admin",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('sports page is 200', function () { pm.response.to.have.status(200); });",
+                "const body = pm.response.json();",
+                "pm.test('sports response is a page, not a map error', function () { pm.expect(body).to.have.property('content'); });"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/sports?page=0&size=20"
+          }
+        },
+        {
+          "name": "Ranking as admin",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "pm.test('ranking is 200', function () { pm.response.to.have.status(200); });",
+                "pm.test('ranking is a page', function () { pm.expect(pm.response.json()).to.have.property('content'); });"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/assessments/ranking?page=0&size=20"
+          }
+        },
+        {
+          "name": "Current user",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('token is accepted', function () { pm.response.to.have.status(200); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/users/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "RBAC",
+      "item": [
+        {
+          "name": "Scout cannot list users",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('scout is forbidden from users', function () { pm.response.to.have.status(403); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{scoutToken}}" }],
+            "url": "{{baseUrl}}/users?page=0&size=20"
+          }
+        },
+        {
+          "name": "Scout can list athletes",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('scout can read athletes', function () { pm.response.to.have.status(200); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{scoutToken}}" }],
+            "url": "{{baseUrl}}/athletes?page=0&size=20"
+          }
+        },
+        {
+          "name": "Scout cannot open shortlists",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('scout is forbidden from shortlists', function () { pm.response.to.have.status(403); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{scoutToken}}" }],
+            "url": "{{baseUrl}}/shortlists?page=0&size=20"
+          }
+        },
+        {
+          "name": "Admin cannot create an assessment",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": ["pm.test('only a scout can create an assessment', function () { pm.response.to.have.status(403); });"],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"athleteId\": \"00000000-0000-0000-0000-000000000000\",\n  \"scores\": []\n}" },
+            "url": "{{baseUrl}}/assessments"
+          }
+        }
+      ]
+    }
+  ]
+}

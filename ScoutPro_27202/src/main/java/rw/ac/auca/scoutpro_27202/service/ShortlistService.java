@@ -1,6 +1,7 @@
 package rw.ac.auca.scoutpro_27202.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -9,14 +10,21 @@ import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Athlete;
 import rw.ac.auca.scoutpro_27202.domain.Shortlist;
 import rw.ac.auca.scoutpro_27202.domain.User;
+import rw.ac.auca.scoutpro_27202.dto.PageRequests;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.dto.ShortlistAthleteResponse;
 import rw.ac.auca.scoutpro_27202.dto.ShortlistRequest;
 import rw.ac.auca.scoutpro_27202.dto.ShortlistResponse;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.ShortlistRepository;
 import rw.ac.auca.scoutpro_27202.repository.UserRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -34,6 +42,12 @@ public class ShortlistService {
     @Autowired
     private CurrentUser currentUser;
 
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
+
+    @Autowired
+    private AuditRecorder auditRecorder;
+
     // CREATE: the owner is whoever is logged in
     @PreAuthorize("hasAnyRole('ADMIN', 'CLUB_MANAGER')")
     @Transactional
@@ -50,17 +64,20 @@ public class ShortlistService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
         Shortlist shortlist = new Shortlist(name, request.notes(), owner);
-        return toResponse(shortlistRepo.save(shortlist));
+        Shortlist saved = shortlistRepo.save(shortlist);
+        auditRecorder.changed("shortlist", saved.getId().toString(), "created", null,
+                Snapshots.of("name", saved.getName()));
+        return toResponse(saved);
     }
 
     // READ: managers see their own lists, admins see all
     @PreAuthorize("hasAnyRole('ADMIN', 'CLUB_MANAGER')")
     @Transactional(readOnly = true)
-    public List<ShortlistResponse> getShortlists() {
-        List<Shortlist> lists = currentUser.hasRole("ADMIN")
-                ? shortlistRepo.findAll()
-                : shortlistRepo.findByOwnerId(currentUser.getId());
-        return lists.stream().map(this::toResponse).toList();
+    public PageResponse<ShortlistResponse> getShortlists(int page, int size) {
+        Page<Shortlist> result = currentUser.hasRole("ADMIN")
+                ? shortlistRepo.findAll(PageRequests.of(page, size))
+                : shortlistRepo.findByOwnerId(currentUser.getId(), PageRequests.of(page, size));
+        return PageResponse.of(result.getContent().stream().map(this::toResponse).toList(), result);
     }
 
     // READ one
@@ -77,7 +94,6 @@ public class ShortlistService {
         Shortlist shortlist = findAccessibleShortlist(id);
         String name = validateName(request);
 
-        // renaming to a name this owner already uses for another list
         boolean nameChanged = !shortlist.getName().equals(name);
         if (nameChanged && shortlistRepo.existsByOwnerIdAndName(shortlist.getOwner().getId(), name)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -86,7 +102,10 @@ public class ShortlistService {
 
         shortlist.setName(name);
         shortlist.setNotes(request.notes());
-        return toResponse(shortlistRepo.save(shortlist));
+        Shortlist saved = shortlistRepo.save(shortlist);
+        auditRecorder.changed("shortlist", saved.getId().toString(), "updated", null,
+                Snapshots.of("name", saved.getName()));
+        return toResponse(saved);
     }
 
     // DELETE (join-table rows are removed automatically)
@@ -94,6 +113,7 @@ public class ShortlistService {
     @Transactional
     public void deleteShortlist(UUID id) {
         shortlistRepo.delete(findAccessibleShortlist(id));
+        auditRecorder.changed("shortlist", id.toString(), "deleted", null, null);
     }
 
     // ADD an athlete (US2)
@@ -118,7 +138,17 @@ public class ShortlistService {
         shortlist.getAthletes().add(athlete);
         Shortlist saved = shortlistRepo.save(shortlist);
 
-        // TODO (RabbitMQ branch): publish "shortlist.athleteadded" so the athlete gets email + SMS
+        // EVENT: athlete receives email + SMS (US2), sent only after the transaction commits
+        Map<String, String> data = new HashMap<>();
+        data.put("shortlistName", shortlist.getName());
+        data.put("athleteId", athlete.getId().toString());
+        data.put("athleteName", athlete.getFullName());
+        data.put("athleteEmail", athlete.getUser() != null ? athlete.getUser().getEmail() : null);
+        data.put("athletePhone", athlete.getContactNumber());
+        data.put("managerEmail", shortlist.getOwner().getEmail());
+        eventPublisher.publish("shortlist.athleteadded", data);
+        auditRecorder.changed("shortlist", saved.getId().toString(), "athlete-added", null,
+                Snapshots.of("athleteId", athleteId, "name", saved.getName()));
 
         return toResponse(saved);
     }
@@ -133,7 +163,10 @@ public class ShortlistService {
         if (!removed) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Athlete is not on this shortlist");
         }
-        return toResponse(shortlistRepo.save(shortlist));
+        Shortlist saved = shortlistRepo.save(shortlist);
+        auditRecorder.changed("shortlist", saved.getId().toString(), "athlete-removed", null,
+                Snapshots.of("athleteId", athleteId));
+        return toResponse(saved);
     }
 
     // ---------- helpers ----------
