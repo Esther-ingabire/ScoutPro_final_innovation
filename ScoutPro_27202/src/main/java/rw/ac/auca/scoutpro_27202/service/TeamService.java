@@ -7,10 +7,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Sport;
 import rw.ac.auca.scoutpro_27202.domain.Team;
+import rw.ac.auca.scoutpro_27202.dto.PageRequests;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.AthleteRepository;
 import rw.ac.auca.scoutpro_27202.repository.TeamRepository;
 
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -24,6 +27,9 @@ public class TeamService {
 
     @Autowired
     private SportService sportService;
+
+    @Autowired
+    private AuditRecorder auditRecorder;
 
     // CREATE
     @PreAuthorize("hasRole('ADMIN')")   // RBAC: only admins manage teams
@@ -39,13 +45,16 @@ public class TeamService {
 
         team.setName(name);
         team.setSport(sport);
-        return teamRepo.save(team);
+        Team saved = teamRepo.save(team);
+        auditRecorder.changed("team", saved.getId().toString(), "created", null,
+                Snapshots.of("name", saved.getName(), "city", saved.getCity(), "level", saved.getLevel()));
+        return saved;
     }
 
     // READ all teams of one sport (any logged-in user)
-    public List<Team> getTeamsBySport(UUID sportId) {
+    public PageResponse<Team> getTeamsBySport(UUID sportId, int page, int size) {
         sportService.getSportById(sportId);
-        return teamRepo.findBySportId(sportId);
+        return PageResponse.of(teamRepo.findBySportId(sportId, PageRequests.of(page, size)));
     }
 
     // READ one (any logged-in user)
@@ -58,6 +67,7 @@ public class TeamService {
     @PreAuthorize("hasRole('ADMIN')")   // RBAC
     public Team updateTeam(UUID id, Team newData) {
         Team existing = getTeamById(id);
+        String before = Snapshots.of("name", existing.getName(), "city", existing.getCity(), "level", existing.getLevel());
         validate(newData);
 
         String name = newData.getName().trim();
@@ -72,7 +82,10 @@ public class TeamService {
         existing.setName(name);
         existing.setCity(newData.getCity());
         existing.setLevel(newData.getLevel());
-        return teamRepo.save(existing);
+        Team saved = teamRepo.save(existing);
+        auditRecorder.changed("team", saved.getId().toString(), "updated", before,
+                Snapshots.of("name", saved.getName(), "city", saved.getCity(), "level", saved.getLevel()));
+        return saved;
     }
 
     // DELETE
@@ -86,6 +99,7 @@ public class TeamService {
                     "Team still has athletes and cannot be deleted");
         }
         teamRepo.deleteById(id);
+        auditRecorder.changed("team", id.toString(), "deleted", null, null);
     }
 
     private void validate(Team team) {

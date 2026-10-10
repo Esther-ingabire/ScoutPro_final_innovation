@@ -5,9 +5,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.domain.Sport;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.service.SportService;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -23,8 +23,9 @@ public class SportController {
     }
 
     @GetMapping
-    public List<Sport> getAllSports() {
-        return sportService.getAllSports();
+    public PageResponse<Sport> getAllSports(@RequestParam(defaultValue = "0") int page,
+                                            @RequestParam(defaultValue = "20") int size) {
+        return sportService.getAllSports(page, size);
     }
 
     @GetMapping("/{id}")

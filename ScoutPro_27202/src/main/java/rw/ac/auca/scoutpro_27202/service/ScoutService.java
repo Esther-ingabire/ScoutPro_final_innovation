@@ -7,12 +7,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Scout;
 import rw.ac.auca.scoutpro_27202.domain.User;
+import rw.ac.auca.scoutpro_27202.dto.PageRequests;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
 import rw.ac.auca.scoutpro_27202.repository.ScoutRepository;
 import rw.ac.auca.scoutpro_27202.repository.UserRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
 
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -29,6 +32,9 @@ public class ScoutService {
 
     @Autowired
     private CurrentUser currentUser;
+
+    @Autowired
+    private AuditRecorder auditRecorder;
 
     // CREATE a scout profile for an existing user who has the SCOUT role
     @PreAuthorize("hasRole('ADMIN')")
@@ -55,13 +61,16 @@ public class ScoutService {
         scout.setEmail(user.getEmail());   // email always comes from the account, never typed twice
         scout.setUser(user);
         scout.setActive(true);
-        return scoutRepo.save(scout);
+        Scout saved = scoutRepo.save(scout);
+        auditRecorder.changed("scout", saved.getId().toString(), "created", null,
+                Snapshots.of("scoutCode", saved.getScoutCode(), "email", saved.getEmail()));
+        return saved;
     }
 
     // READ all
     @PreAuthorize("hasRole('ADMIN')")
-    public List<Scout> getAllScouts() {
-        return scoutRepo.findAll();
+    public PageResponse<Scout> getAllScouts(int page, int size) {
+        return PageResponse.of(scoutRepo.findAll(PageRequests.of(page, size)));
     }
 
     // READ one
@@ -95,10 +104,16 @@ public class ScoutService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Full name is required");
         }
 
+        String before = Snapshots.of("fullName", existing.getFullName(), "phone", existing.getPhoneNumber(),
+                "organization", existing.getOrganization());
         existing.setFullName(newData.getFullName());
         existing.setPhoneNumber(newData.getPhoneNumber());
         existing.setOrganization(newData.getOrganization());
-        return scoutRepo.save(existing);
+        Scout saved = scoutRepo.save(existing);
+        auditRecorder.changed("scout", saved.getId().toString(), "updated", before,
+                Snapshots.of("fullName", saved.getFullName(), "phone", saved.getPhoneNumber(),
+                        "organization", saved.getOrganization()));
+        return saved;
     }
 
     // DEACTIVATE
@@ -106,7 +121,10 @@ public class ScoutService {
     public Scout deactivateScout(UUID id) {
         Scout scout = getScoutById(id);
         scout.setActive(false);
-        return scoutRepo.save(scout);
+        Scout saved = scoutRepo.save(scout);
+        auditRecorder.changed("scout", saved.getId().toString(), "deactivated", null,
+                Snapshots.of("active", false));
+        return saved;
     }
 
     // DELETE (only scouts with no assessments)
@@ -120,6 +138,7 @@ public class ScoutService {
                     "Scout has recorded assessments; deactivate instead");
         }
         scoutRepo.deleteById(id);
+        auditRecorder.changed("scout", id.toString(), "deleted", null, null);
     }
 
     private void validate(Scout scout) {

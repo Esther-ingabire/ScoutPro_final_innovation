@@ -1,8 +1,10 @@
 package rw.ac.auca.scoutpro_27202.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -11,10 +13,16 @@ import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.*;
 import rw.ac.auca.scoutpro_27202.dto.AssessmentRequest;
 import rw.ac.auca.scoutpro_27202.dto.AssessmentResponse;
+import rw.ac.auca.scoutpro_27202.dto.PageRequests;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.dto.ScoreRequest;
 import rw.ac.auca.scoutpro_27202.dto.ScoreResponse;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
 import rw.ac.auca.scoutpro_27202.repository.CriterionRepository;
+import rw.ac.auca.scoutpro_27202.repository.ScoutingReportRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
 
 import java.time.LocalDate;
@@ -31,6 +39,9 @@ public class AssessmentService {
     private CriterionRepository criterionRepo;
 
     @Autowired
+    private ScoutingReportRepository reportRepo;
+
+    @Autowired
     private AthleteService athleteService;
 
     @Autowired
@@ -39,9 +50,16 @@ public class AssessmentService {
     @Autowired
     private CurrentUser currentUser;
 
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
+
+    @Autowired
+    private AuditRecorder auditRecorder;
+
     // CREATE: only scouts record assessments (US1)
     @PreAuthorize("hasRole('SCOUT')")
     @Transactional
+    @CacheEvict(cacheNames = "ranking", allEntries = true)
     public AssessmentResponse createAssessment(AssessmentRequest request) {
         // 1. the scout is whoever is logged in
         Scout scout = scoutService.getMyScoutProfile();
@@ -64,7 +82,7 @@ public class AssessmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Assessment date can't be in the future");
         }
 
-        // 4. same-day rule (US1): one assessment per scout, per athlete, per day
+        // 4. same-day rule (US1)
         if (assessmentRepo.existsByScoutIdAndAthleteIdAndAssessmentDate(scout.getId(), athlete.getId(), date)) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "You already assessed this athlete on " + date);
@@ -85,10 +103,23 @@ public class AssessmentService {
         try {
             assessmentRepo.saveAndFlush(assessment);
         } catch (DataIntegrityViolationException e) {
-            // two identical requests at the same instant: the DB unique constraint caught the second
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "You already assessed this athlete on " + date);
         }
+
+        // EVENT: email the athlete a summary + audit log (sent only after commit)
+        Map<String, String> data = new HashMap<>();
+        data.put("assessmentId", assessment.getId().toString());
+        data.put("athleteId", athlete.getId().toString());
+        data.put("athleteName", athlete.getFullName());
+        data.put("athleteEmail", athlete.getUser() != null ? athlete.getUser().getEmail() : null);
+        data.put("scoutName", scout.getFullName());
+        data.put("overallScore", String.valueOf(assessment.getOverallScore()));
+        data.put("assessmentDate", date.toString());
+        eventPublisher.publish("assessment.created", data);
+        auditRecorder.changed("assessment", assessment.getId().toString(), "created", null,
+                Snapshots.of("athleteId", athlete.getId(), "overallScore", assessment.getOverallScore(), "date", date));
+
         return toResponse(assessment);
     }
 
@@ -100,31 +131,29 @@ public class AssessmentService {
     }
 
     // READ an athlete's history, newest first
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER', 'ATHLETE')")
     @Transactional(readOnly = true)
-    public List<AssessmentResponse> getAthleteHistory(UUID athleteId, int page, int size) {
-        athleteService.getAthleteById(athleteId);   // 404 if the athlete doesn't exist
-        return assessmentRepo
-                .findByAthleteIdOrderByAssessmentDateDesc(athleteId, PageRequest.of(page, Math.min(size, 100)))
-                .getContent().stream()
-                .map(this::toResponse)
-                .toList();
+    public PageResponse<AssessmentResponse> getAthleteHistory(UUID athleteId, int page, int size) {
+        athleteService.getAthleteById(athleteId);   // 403 when an athlete asks for someone else
+        Page<Assessment> result = assessmentRepo
+                .findByAthleteIdOrderByAssessmentDateDesc(athleteId, PageRequests.of(page, size));
+        return PageResponse.of(result.getContent().stream().map(this::toResponse).toList(), result);
     }
 
-    // READ ranking: highest overall score first (simple version)
+    // READ ranking: highest overall score first. Cached until an assessment is saved or deleted.
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
     @Transactional(readOnly = true)
-    public List<AssessmentResponse> getRanking(int page, int size) {
-        return assessmentRepo
-                .findAllByOrderByOverallScoreDesc(PageRequest.of(page, Math.min(size, 100)))
-                .getContent().stream()
-                .map(this::toResponse)
-                .toList();
+    @Cacheable(cacheNames = "ranking", key = "#page + '-' + #size")
+    public PageResponse<AssessmentResponse> getRanking(int page, int size) {
+        Page<Assessment> result = assessmentRepo
+                .findAllByOrderByOverallScoreDesc(PageRequests.of(page, size));
+        return PageResponse.of(result.getContent().stream().map(this::toResponse).toList(), result);
     }
 
     // UPDATE remarks and scores: admin, or the scout who made it
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     @Transactional
+    @CacheEvict(cacheNames = "ranking", allEntries = true)
     public AssessmentResponse updateAssessment(UUID id, AssessmentRequest request) {
         Assessment assessment = findAssessment(id);
         checkCanModify(assessment);
@@ -132,7 +161,6 @@ public class AssessmentService {
         List<Criterion> criteria = criterionRepo.findBySportId(assessment.getAthlete().getSport().getId());
         Map<UUID, Double> scores = validateScores(request.scores(), criteria);
 
-        // change existing score rows in place; add rows only for criteria added since
         Map<UUID, AssessmentScore> existing = new HashMap<>();
         for (AssessmentScore s : assessment.getScores()) {
             existing.put(s.getCriterion().getId(), s);
@@ -148,16 +176,22 @@ public class AssessmentService {
 
         assessment.setRemarks(request.remarks());
         assessment.setOverallScore(calculateOverall(scores, criteria));
-        return toResponse(assessmentRepo.save(assessment));
+        Assessment saved = assessmentRepo.save(assessment);
+        auditRecorder.changed("assessment", saved.getId().toString(), "updated", null,
+                Snapshots.of("overallScore", saved.getOverallScore()));
+        return toResponse(saved);
     }
 
-    // DELETE: admin, or the scout who made it (scores are deleted by cascade)
+    // DELETE: admin, or the scout who made it
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     @Transactional
+    @CacheEvict(cacheNames = "ranking", allEntries = true)
     public void deleteAssessment(UUID id) {
         Assessment assessment = findAssessment(id);
         checkCanModify(assessment);
         assessmentRepo.delete(assessment);
+        reportRepo.deleteByAssessmentId(id.toString());   // MongoDB has no cascade from Postgres
+        auditRecorder.changed("assessment", id.toString(), "deleted", null, null);
     }
 
     // ---------- helpers ----------
@@ -167,7 +201,6 @@ public class AssessmentService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Assessment not found"));
     }
 
-    // ownership: admins can modify any assessment, scouts only their own
     private void checkCanModify(Assessment assessment) {
         if (currentUser.hasRole("ADMIN")) {
             return;
@@ -178,7 +211,6 @@ public class AssessmentService {
         }
     }
 
-    // every criterion of the sport scored exactly once, 0–100, nothing from other sports
     private Map<UUID, Double> validateScores(List<ScoreRequest> input, List<Criterion> criteria) {
         if (criteria.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
@@ -204,7 +236,6 @@ public class AssessmentService {
             }
         }
 
-        // US1: name the missing criteria
         List<String> missing = criteria.stream()
                 .filter(c -> !scores.containsKey(c.getId()))
                 .map(Criterion::getName)
@@ -216,7 +247,6 @@ public class AssessmentService {
         return scores;
     }
 
-    // FR5: overall = Σ(score × weight) ÷ Σ(weight), rounded to 2 decimals
     private double calculateOverall(Map<UUID, Double> scores, List<Criterion> criteria) {
         double weightedSum = 0;
         double totalWeight = 0;
@@ -227,12 +257,10 @@ public class AssessmentService {
         return Math.round(weightedSum / totalWeight * 100) / 100.0;
     }
 
-    // e.g. ASM-3F2A9C1E
     private String generateCode() {
         return "ASM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
-    // entity → response DTO, built while the DB session is still open
     private AssessmentResponse toResponse(Assessment a) {
         List<ScoreResponse> scoreList = a.getScores().stream()
                 .map(s -> new ScoreResponse(

@@ -6,16 +6,28 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import rw.ac.auca.scoutpro_27202.domain.Assessment;
 import rw.ac.auca.scoutpro_27202.domain.Athlete;
 import rw.ac.auca.scoutpro_27202.domain.Sport;
 import rw.ac.auca.scoutpro_27202.domain.Team;
+import rw.ac.auca.scoutpro_27202.domain.User;
+import rw.ac.auca.scoutpro_27202.dto.PageRequests;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
 import rw.ac.auca.scoutpro_27202.repository.AthleteRepository;
 import rw.ac.auca.scoutpro_27202.repository.PhysicalProfileRepository;
 import rw.ac.auca.scoutpro_27202.repository.ShortlistRepository;
+import rw.ac.auca.scoutpro_27202.repository.UserRepository;
+import rw.ac.auca.scoutpro_27202.security.CurrentUser;
 
 import java.time.LocalDate;
-import java.util.List;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -39,8 +51,20 @@ public class AthleteService {
     @Autowired
     private TeamService teamService;
 
+    @Autowired
+    private EventPublisher eventPublisher;   // EVENT
+
+    @Autowired
+    private AuditRecorder auditRecorder;
+
+    @Autowired
+    private CurrentUser currentUser;
+
+    @Autowired
+    private UserRepository userRepo;
+
     // CREATE
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")   // RBAC: scouts register athletes
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     public Athlete saveAthlete(UUID sportId, UUID teamId, Athlete athlete) {
         Sport sport = sportService.getSportById(sportId);
         validate(athlete);
@@ -54,24 +78,72 @@ public class AthleteService {
         athlete.setSport(sport);
         athlete.setTeam(resolveTeam(teamId, sportId));
         athlete.setActive(true);
-        return athleteRepo.save(athlete);
+        Athlete saved = athleteRepo.save(athlete);
+        auditRecorder.changed("athlete", saved.getId().toString(), "created", null, athleteSnapshot(saved));
+        return saved;
     }
 
-    // READ all
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")   // RBAC
-    public List<Athlete> getAllAthletes() {
-        return athleteRepo.findAll();
+    // READ all — staff only. An athlete uses getMyAthlete instead.
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
+    public PageResponse<Athlete> getAllAthletes(int page, int size) {
+        return PageResponse.of(athleteRepo.findAll(PageRequests.of(page, size)));
     }
 
-    // READ one
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")   // RBAC
+    // READ one. Staff may open any athlete. An ATHLETE may open only the row linked to their login.
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER', 'ATHLETE')")
     public Athlete getAthleteById(UUID id) {
-        return athleteRepo.findById(id)
+        Athlete athlete = athleteRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Athlete not found"));
+        checkAthleteOwnership(athlete);
+        return athlete;
+    }
+
+    @PreAuthorize("hasRole('ATHLETE')")
+    public Athlete getMyAthlete() {
+        return athleteRepo.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "No athlete profile is linked to your account"));
+    }
+
+    @PreAuthorize("hasRole('ATHLETE')")
+    public Athlete updateMyContact(String contactNumber) {
+        if (contactNumber == null || contactNumber.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contact number is required");
+        }
+        Athlete athlete = getMyAthlete();
+        String before = athleteSnapshot(athlete);
+        athlete.setContactNumber(contactNumber.trim());
+        Athlete saved = athleteRepo.save(athlete);
+        auditRecorder.changed("athlete", saved.getId().toString(), "contact-updated", before, athleteSnapshot(saved));
+        return saved;
+    }
+
+    // Admin links (or unlinks) a login account. userId null removes the link.
+    @PreAuthorize("hasRole('ADMIN')")
+    public Athlete linkAccount(UUID id, UUID userId) {
+        Athlete athlete = athleteRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Athlete not found"));
+        String before = athleteSnapshot(athlete);
+        if (userId == null) {
+            athlete.setUser(null);
+        } else {
+            User user = userRepo.findById(userId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+            athleteRepo.findByUserId(userId).ifPresent(other -> {
+                if (!other.getId().equals(id)) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "That account is already linked to another athlete");
+                }
+            });
+            athlete.setUser(user);
+        }
+        Athlete saved = athleteRepo.save(athlete);
+        auditRecorder.changed("athlete", saved.getId().toString(), "account-linked", before, athleteSnapshot(saved));
+        return saved;
     }
 
     // UPDATE
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")   // RBAC
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")
     public Athlete updateAthlete(UUID id, UUID teamId, Athlete newData) {
         Athlete existing = getAthleteById(id);
         validate(newData);
@@ -82,6 +154,7 @@ public class AthleteService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Athlete code already exists");
         }
 
+        String before = athleteSnapshot(existing);
         existing.setAthleteCode(code);
         existing.setFullName(newData.getFullName());
         existing.setDateOfBirth(newData.getDateOfBirth());
@@ -89,19 +162,32 @@ public class AthleteService {
         existing.setNationality(newData.getNationality());
         existing.setContactNumber(newData.getContactNumber());
         existing.setTeam(resolveTeam(teamId, existing.getSport().getId()));
-        return athleteRepo.save(existing);
+        Athlete saved = athleteRepo.save(existing);
+        auditRecorder.changed("athlete", saved.getId().toString(), "updated", before, athleteSnapshot(saved));
+        return saved;
     }
 
     // DEACTIVATE
-    @PreAuthorize("hasRole('ADMIN')")   // RBAC: matrix says admin deactivates
+    @PreAuthorize("hasRole('ADMIN')")
     public Athlete deactivateAthlete(UUID id) {
         Athlete athlete = getAthleteById(id);
         athlete.setActive(false);
-        return athleteRepo.save(athlete);
+        Athlete saved = athleteRepo.save(athlete);
+
+        // EVENT: inform scouts and write to audit log
+        Map<String, String> data = new HashMap<>();
+        data.put("athleteId", saved.getId().toString());
+        data.put("athleteName", saved.getFullName());
+        data.put("scoutEmails", scoutEmails(saved.getId()));
+        eventPublisher.publish("athlete.deactivated", data);
+        auditRecorder.changed("athlete", saved.getId().toString(), "deactivated", null,
+                Snapshots.of("active", false, "fullName", saved.getFullName()));
+
+        return saved;
     }
 
     // DELETE
-    @PreAuthorize("hasRole('ADMIN')")   // RBAC
+    @PreAuthorize("hasRole('ADMIN')")
     @Transactional
     public void deleteAthlete(UUID id) {
         if (!athleteRepo.existsById(id)) {
@@ -113,6 +199,7 @@ public class AthleteService {
         }
         profileRepo.findByAthleteId(id).ifPresent(profileRepo::delete);
         athleteRepo.deleteById(id);
+        auditRecorder.changed("athlete", id.toString(), "deleted", null, null);
     }
 
     // ---------- helpers ----------
@@ -127,6 +214,41 @@ public class AthleteService {
                     "Team plays a different sport than the athlete");
         }
         return team;
+    }
+
+    private void checkAthleteOwnership(Athlete athlete) {
+        if (isStaff()) {
+            return;
+        }
+        boolean own = athlete.getUser() != null && athlete.getUser().getId().equals(currentUser.getId());
+        if (!own) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only view your own athlete profile");
+        }
+    }
+
+    private boolean isStaff() {
+        return currentUser.hasRole("ADMIN") || currentUser.hasRole("SCOUT") || currentUser.hasRole("CLUB_MANAGER");
+    }
+
+    private String scoutEmails(UUID athleteId) {
+        Set<String> emails = new LinkedHashSet<>();
+        for (Assessment assessment : assessmentRepo.findWithScoutByAthleteId(athleteId)) {
+            String email = assessment.getScout().getEmail();
+            if (email != null && !email.isBlank()) {
+                emails.add(email);
+            }
+        }
+        return String.join(",", emails);
+    }
+
+    private String athleteSnapshot(Athlete athlete) {
+        return Snapshots.of(
+                "code", athlete.getAthleteCode(),
+                "fullName", athlete.getFullName(),
+                "position", athlete.getPosition(),
+                "contact", athlete.getContactNumber(),
+                "active", athlete.isActive(),
+                "userId", athlete.getUser() == null ? null : athlete.getUser().getId());
     }
 
     private void validate(Athlete athlete) {

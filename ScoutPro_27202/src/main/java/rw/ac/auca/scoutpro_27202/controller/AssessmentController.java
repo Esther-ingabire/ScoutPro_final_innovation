@@ -6,9 +6,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.dto.AssessmentRequest;
 import rw.ac.auca.scoutpro_27202.dto.AssessmentResponse;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.service.AssessmentService;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -24,8 +24,8 @@ public class AssessmentController {
     }
 
     @GetMapping("/assessments/ranking")
-    public List<AssessmentResponse> getRanking(@RequestParam(defaultValue = "0") int page,
-                                               @RequestParam(defaultValue = "20") int size) {
+    public PageResponse<AssessmentResponse> getRanking(@RequestParam(defaultValue = "0") int page,
+                                                       @RequestParam(defaultValue = "20") int size) {
         return assessmentService.getRanking(page, size);
     }
 
@@ -35,7 +35,7 @@ public class AssessmentController {
     }
 
     @GetMapping("/athletes/{athleteId}/assessments")
-    public List<AssessmentResponse> getAthleteHistory(@PathVariable UUID athleteId,
+    public PageResponse<AssessmentResponse> getAthleteHistory(@PathVariable UUID athleteId,
                                                       @RequestParam(defaultValue = "0") int page,
                                                       @RequestParam(defaultValue = "20") int size) {
         return assessmentService.getAthleteHistory(athleteId, page, size);
