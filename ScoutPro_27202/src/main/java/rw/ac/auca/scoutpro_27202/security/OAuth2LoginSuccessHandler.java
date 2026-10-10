@@ -16,6 +16,9 @@ import rw.ac.auca.scoutpro_27202.messaging.EventPublisher;
 import rw.ac.auca.scoutpro_27202.repository.RoleRepository;
 import rw.ac.auca.scoutpro_27202.repository.UserRepository;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -36,8 +39,14 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     @Autowired
     private EventPublisher eventPublisher;
 
+    @Autowired
+    private RefreshTokenService refreshTokenService;
+
     @Value("${app.frontend-url}")
     private String frontendUrl;
+
+    @Value("${app.admin.email}")
+    private String adminEmail;
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
@@ -63,6 +72,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         if (user == null) {
             // US3: a new Google user gets an account with the ATHLETE role
             user = new User(email, null, AuthProvider.GOOGLE);   // no password: Google verifies them
+            user.setEmailVerified(true);                         // Google already confirmed the address
             user.setProviderId(googleId);
             user.getRoles().add(roleRepo.findByName("ATHLETE").orElseThrow());
             userRepo.save(user);
@@ -70,11 +80,16 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             Map<String, String> data = new HashMap<>();
             data.put("userId", user.getId().toString());
             data.put("email", user.getEmail());
-            eventPublisher.publish("user.registered", data);     // welcome email, as for password signup
+            data.put("adminEmail", adminEmail);
+            eventPublisher.publish("user.registered", data);     // welcome email + admin alert
 
         } else if (user.getProviderId() == null) {
             // existing password account with the same VERIFIED email: link it to Google
             user.setProviderId(googleId);
+            user.setEmailVerified(true);
+            user.setOtpHash(null);
+            user.setOtpExpiresAt(null);
+            user.setOtpAttempts(0);
             userRepo.save(user);
         }
 
@@ -85,10 +100,12 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         }
 
         String token = jwtService.generateToken(user);
+        String refreshToken = refreshTokenService.issue(user);
         endLoginSession(request);
 
-        // the token goes in the #fragment: browsers never send fragments to servers or logs
-        response.sendRedirect(frontendUrl + "/oauth2/callback#token=" + token);
+        // Both tokens go in the #fragment: browsers never send fragments to servers or logs.
+        response.sendRedirect(frontendUrl + "/oauth2/callback#token=" + url(token)
+                + "&refreshToken=" + url(refreshToken));
     }
 
     // the session was only needed during the Google handshake; from now on the JWT is used
@@ -98,5 +115,9 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             session.invalidate();
         }
         SecurityContextHolder.clearContext();
+    }
+
+    private String url(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

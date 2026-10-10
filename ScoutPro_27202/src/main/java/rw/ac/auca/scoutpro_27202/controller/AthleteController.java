@@ -5,9 +5,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.domain.Athlete;
+import rw.ac.auca.scoutpro_27202.dto.ContactUpdateRequest;
+import rw.ac.auca.scoutpro_27202.dto.LinkAccountRequest;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.service.AthleteService;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -26,8 +28,25 @@ public class AthleteController {
     }
 
     @GetMapping("/athletes")
-    public List<Athlete> getAllAthletes() {
-        return athleteService.getAllAthletes();
+    public PageResponse<Athlete> getAllAthletes(@RequestParam(defaultValue = "0") int page,
+                                                @RequestParam(defaultValue = "20") int size) {
+        return athleteService.getAllAthletes(page, size);
+    }
+
+    // Declared before /athletes/{id} so the word "me" is not treated as an id.
+    @GetMapping("/athletes/me")
+    public Athlete getMyAthlete() {
+        return athleteService.getMyAthlete();
+    }
+
+    @PatchMapping("/athletes/me/contact")
+    public Athlete updateMyContact(@RequestBody ContactUpdateRequest request) {
+        return athleteService.updateMyContact(request.contactNumber());
+    }
+
+    @PutMapping("/athletes/{id}/account")
+    public Athlete linkAccount(@PathVariable UUID id, @RequestBody LinkAccountRequest request) {
+        return athleteService.linkAccount(id, request.userId());
     }
 
     @GetMapping("/athletes/{id}")

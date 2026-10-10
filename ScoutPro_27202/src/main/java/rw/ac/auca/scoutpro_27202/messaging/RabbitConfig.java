@@ -37,6 +37,7 @@ public class RabbitConfig {
 
                 // which events reach which queue (routing table from the design doc)
                 BindingBuilder.bind(email).to(events).with("user.registered"),
+                BindingBuilder.bind(email).to(events).with("user.otp.sent"),
                 BindingBuilder.bind(email).to(events).with("assessment.created"),
                 BindingBuilder.bind(email).to(events).with("shortlist.athleteadded"),
                 BindingBuilder.bind(email).to(events).with("athlete.deactivated"),

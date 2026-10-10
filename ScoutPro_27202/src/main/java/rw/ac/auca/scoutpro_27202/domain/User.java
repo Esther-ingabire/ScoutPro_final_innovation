@@ -3,7 +3,7 @@ package rw.ac.auca.scoutpro_27202.domain;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 
-
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -27,6 +27,19 @@ public class User extends BaseEntity {
     private String providerId;
 
     private boolean enabled;
+
+    // null means this account was created before email codes existed, so it may sign in.
+    // false means a new password signup must enter the emailed code first.
+    private Boolean emailVerified;
+
+    @JsonIgnore
+    private String otpHash;
+
+    @JsonIgnore
+    private Instant otpExpiresAt;
+
+    @JsonIgnore
+    private Integer otpAttempts;
 
     // join table user_roles(user_id, role_id)
     @ManyToMany(fetch = FetchType.EAGER)
@@ -94,5 +107,37 @@ public class User extends BaseEntity {
 
     public void setRoles(Set<Role> roles) {
         this.roles = roles;
+    }
+
+    public Boolean getEmailVerified() {
+        return emailVerified;
+    }
+
+    public void setEmailVerified(Boolean emailVerified) {
+        this.emailVerified = emailVerified;
+    }
+
+    public String getOtpHash() {
+        return otpHash;
+    }
+
+    public void setOtpHash(String otpHash) {
+        this.otpHash = otpHash;
+    }
+
+    public Instant getOtpExpiresAt() {
+        return otpExpiresAt;
+    }
+
+    public void setOtpExpiresAt(Instant otpExpiresAt) {
+        this.otpExpiresAt = otpExpiresAt;
+    }
+
+    public Integer getOtpAttempts() {
+        return otpAttempts;
+    }
+
+    public void setOtpAttempts(Integer otpAttempts) {
+        this.otpAttempts = otpAttempts;
     }
 }

@@ -5,9 +5,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.domain.Criterion;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.service.CriterionService;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -25,8 +25,10 @@ public class CriterionController {
     }
 
     @GetMapping("/sports/{sportId}/criteria")
-    public List<Criterion> getCriteriaBySport(@PathVariable UUID sportId) {
-        return criterionService.getCriteriaBySport(sportId);
+    public PageResponse<Criterion> getCriteriaBySport(@PathVariable UUID sportId,
+                                                      @RequestParam(defaultValue = "0") int page,
+                                                      @RequestParam(defaultValue = "100") int size) {
+        return criterionService.getCriteriaBySport(sportId, page, size);
     }
 
     @GetMapping("/criteria/{id}")

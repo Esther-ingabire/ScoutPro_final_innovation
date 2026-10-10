@@ -1,14 +1,17 @@
 package rw.ac.auca.scoutpro_27202.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.document.ScoutingReport;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
+import rw.ac.auca.scoutpro_27202.dto.ReportFile;
 import rw.ac.auca.scoutpro_27202.dto.ScoutingReportRequest;
 import rw.ac.auca.scoutpro_27202.service.ScoutingReportService;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -29,6 +32,15 @@ public class ScoutingReportController {
         return reportService.getByAssessment(assessmentId);
     }
 
+    @GetMapping(value = "/assessments/{assessmentId}/report.pdf", produces = "application/pdf")
+    public ResponseEntity<byte[]> downloadReport(@PathVariable UUID assessmentId) {
+        ReportFile file = reportService.pdf(assessmentId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.filename() + "\"")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(file.bytes());
+    }
+
     @PutMapping("/assessments/{assessmentId}/report")
     public ScoutingReport updateReport(@PathVariable UUID assessmentId,
                                        @RequestBody ScoutingReportRequest request) {
@@ -42,12 +54,16 @@ public class ScoutingReportController {
     }
 
     @GetMapping("/athletes/{athleteId}/reports")
-    public List<ScoutingReport> getAthleteReports(@PathVariable UUID athleteId) {
-        return reportService.getByAthlete(athleteId);
+    public PageResponse<ScoutingReport> getAthleteReports(@PathVariable UUID athleteId,
+                                                          @RequestParam(defaultValue = "0") int page,
+                                                          @RequestParam(defaultValue = "20") int size) {
+        return reportService.getByAthlete(athleteId, page, size);
     }
 
     @GetMapping("/reports/search")
-    public List<ScoutingReport> search(@RequestParam String q) {
-        return reportService.search(q);
+    public PageResponse<ScoutingReport> search(@RequestParam String q,
+                                               @RequestParam(defaultValue = "0") int page,
+                                               @RequestParam(defaultValue = "20") int size) {
+        return reportService.search(q, page, size);
     }
 }
