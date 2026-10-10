@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Athlete;
 import rw.ac.auca.scoutpro_27202.domain.PhysicalProfile;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.PhysicalProfileRepository;
 
 import java.time.LocalDate;
@@ -20,6 +22,9 @@ public class PhysicalProfileService {
 
     @Autowired
     private AthleteService athleteService;
+
+    @Autowired
+    private AuditRecorder auditRecorder;
 
     // CREATE or UPDATE
     @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT')")   // RBAC: scouts measure athletes
@@ -35,11 +40,15 @@ public class PhysicalProfileService {
         profile.setDominantSide(data.getDominantSide());
         profile.setMeasuredAt(data.getMeasuredAt() != null ? data.getMeasuredAt() : LocalDate.now());
         profile.setAthlete(athlete);
-        return profileRepo.save(profile);
+        PhysicalProfile saved = profileRepo.save(profile);
+        auditRecorder.changed("physicalProfile", athleteId.toString(), "upserted", null,
+                Snapshots.of("heightCm", saved.getHeightCm(), "weightKg", saved.getWeightKg(),
+                        "dominantSide", saved.getDominantSide()));
+        return saved;
     }
 
-    // READ
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")   // RBAC
+    // READ. An athlete may read only their own profile (checked inside getAthleteById).
+    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER', 'ATHLETE')")   // RBAC
     public PhysicalProfile getProfileByAthlete(UUID athleteId) {
         athleteService.getAthleteById(athleteId);
         return profileRepo.findByAthleteId(athleteId)

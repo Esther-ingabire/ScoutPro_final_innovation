@@ -1,10 +1,11 @@
 package rw.ac.auca.scoutpro_27202.repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.core.query.TextCriteria;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import rw.ac.auca.scoutpro_27202.document.ScoutingReport;
 
-import java.util.List;
 import java.util.Optional;
 
 public interface ScoutingReportRepository extends MongoRepository<ScoutingReport, String> {
@@ -13,10 +14,10 @@ public interface ScoutingReportRepository extends MongoRepository<ScoutingReport
 
     boolean existsByAssessmentId(String assessmentId);
 
-    List<ScoutingReport> findByAthleteIdOrderByCreatedAtDesc(String athleteId);
+    Page<ScoutingReport> findByAthleteIdOrderByCreatedAtDesc(String athleteId, Pageable pageable);
 
     // full-text search over summary + tags
-    List<ScoutingReport> findAllBy(TextCriteria criteria);
+    Page<ScoutingReport> findAllBy(TextCriteria criteria, Pageable pageable);
 
     void deleteByAssessmentId(String assessmentId);
 }

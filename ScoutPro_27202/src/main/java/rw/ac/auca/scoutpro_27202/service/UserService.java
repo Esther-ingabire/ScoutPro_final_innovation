@@ -7,6 +7,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.domain.Role;
 import rw.ac.auca.scoutpro_27202.domain.User;
+import rw.ac.auca.scoutpro_27202.dto.PageRequests;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
+import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
+import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.RoleRepository;
 import rw.ac.auca.scoutpro_27202.repository.UserRepository;
 
@@ -14,6 +18,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class UserService {
@@ -24,10 +29,13 @@ public class UserService {
     @Autowired
     private RoleRepository roleRepo;
 
+    @Autowired
+    private AuditRecorder auditRecorder;
+
     // READ all
     @PreAuthorize("hasRole('ADMIN')")
-    public List<User> getAllUsers() {
-        return userRepo.findAll();
+    public PageResponse<User> getAllUsers(int page, int size) {
+        return PageResponse.of(userRepo.findAll(PageRequests.of(page, size)));
     }
 
     // READ one
@@ -45,6 +53,7 @@ public class UserService {
         }
 
         User user = getUserById(id);
+        String before = Snapshots.of("roles", roleNames(user));
 
         // turn ["scout"] into real Role rows; unknown names are rejected
         Set<Role> newRoles = new HashSet<>();
@@ -65,6 +74,13 @@ public class UserService {
 
         user.getRoles().clear();
         user.getRoles().addAll(newRoles);
-        return userRepo.save(user);
+        User saved = userRepo.save(user);
+        auditRecorder.changed("user", saved.getId().toString(), "roles-updated", before,
+                Snapshots.of("roles", roleNames(saved)));
+        return saved;
+    }
+
+    private String roleNames(User user) {
+        return user.getRoles().stream().map(Role::getName).sorted().collect(Collectors.joining(","));
     }
 }

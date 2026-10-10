@@ -8,7 +8,11 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.dto.AuthResponse;
 import rw.ac.auca.scoutpro_27202.dto.LoginRequest;
+import rw.ac.auca.scoutpro_27202.dto.OtpRequest;
+import rw.ac.auca.scoutpro_27202.dto.RefreshRequest;
 import rw.ac.auca.scoutpro_27202.dto.RegisterRequest;
+import rw.ac.auca.scoutpro_27202.dto.RegisterResponse;
+import rw.ac.auca.scoutpro_27202.dto.ResendOtpRequest;
 import rw.ac.auca.scoutpro_27202.service.AuthService;
 
 import java.util.Map;
@@ -21,13 +25,34 @@ public class AuthController {
     private AuthService authService;
 
     @PostMapping("/auth/register")
-    public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<RegisterResponse> register(@RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    }
+
+    @PostMapping("/auth/verify-otp")
+    public AuthResponse verifyOtp(@RequestBody OtpRequest request) {
+        return authService.verifyOtp(request);
+    }
+
+    @PostMapping("/auth/resend-otp")
+    public RegisterResponse resendOtp(@RequestBody ResendOtpRequest request) {
+        return authService.resendOtp(request);
     }
 
     @PostMapping("/auth/login")
     public AuthResponse login(@RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @PostMapping("/auth/refresh")
+    public AuthResponse refresh(@RequestBody RefreshRequest request) {
+        return authService.refresh(request.refreshToken());
+    }
+
+    @PostMapping("/auth/logout")
+    public ResponseEntity<Void> logout(@RequestBody RefreshRequest request) {
+        authService.logout(request.refreshToken());
+        return ResponseEntity.noContent().build();
     }
 
     // needs a token: shows what the server reads from it

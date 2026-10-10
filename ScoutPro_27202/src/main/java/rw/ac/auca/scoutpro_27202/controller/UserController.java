@@ -5,10 +5,10 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import rw.ac.auca.scoutpro_27202.domain.User;
+import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.dto.RoleUpdateRequest;
 import rw.ac.auca.scoutpro_27202.service.UserService;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -19,8 +19,9 @@ public class UserController {
     private UserService userService;
 
     @GetMapping
-    public List<User> getAllUsers() {
-        return userService.getAllUsers();
+    public PageResponse<User> getAllUsers(@RequestParam(defaultValue = "0") int page,
+                                          @RequestParam(defaultValue = "20") int size) {
+        return userService.getAllUsers(page, size);
     }
 
     @GetMapping("/{id}")
