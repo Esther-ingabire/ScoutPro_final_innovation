@@ -22,6 +22,7 @@ public class ScoutingReport {
     @Indexed
     private String athleteId;          // fast "all reports for this athlete"
 
+    @Indexed
     private String scoutId;
 
     @TextIndexed

@@ -60,6 +60,12 @@ public class ScoutingReportController {
         return reportService.getByAthlete(athleteId, page, size);
     }
 
+    @GetMapping("/reports/mine")
+    public PageResponse<ScoutingReport> mine(@RequestParam(defaultValue = "0") int page,
+                                             @RequestParam(defaultValue = "20") int size) {
+        return reportService.mine(page, size);
+    }
+
     @GetMapping("/reports/search")
     public PageResponse<ScoutingReport> search(@RequestParam String q,
                                                @RequestParam(defaultValue = "0") int page,

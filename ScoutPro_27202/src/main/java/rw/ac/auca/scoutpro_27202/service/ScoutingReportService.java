@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 import rw.ac.auca.scoutpro_27202.document.MediaClip;
 import rw.ac.auca.scoutpro_27202.document.ScoutingReport;
 import rw.ac.auca.scoutpro_27202.domain.Assessment;
+import rw.ac.auca.scoutpro_27202.domain.Scout;
 import rw.ac.auca.scoutpro_27202.dto.PageRequests;
 import rw.ac.auca.scoutpro_27202.dto.PageResponse;
 import rw.ac.auca.scoutpro_27202.dto.ReportFile;
@@ -18,6 +19,7 @@ import rw.ac.auca.scoutpro_27202.dto.ScoutingReportRequest;
 import rw.ac.auca.scoutpro_27202.messaging.AuditRecorder;
 import rw.ac.auca.scoutpro_27202.messaging.Snapshots;
 import rw.ac.auca.scoutpro_27202.repository.AssessmentRepository;
+import rw.ac.auca.scoutpro_27202.repository.ScoutRepository;
 import rw.ac.auca.scoutpro_27202.repository.ScoutingReportRepository;
 import rw.ac.auca.scoutpro_27202.security.CurrentUser;
 import rw.ac.auca.scoutpro_27202.service.AthleteService;
@@ -35,6 +37,9 @@ public class ScoutingReportService {
 
     @Autowired
     private AssessmentRepository assessmentRepo;
+
+    @Autowired
+    private ScoutRepository scoutRepo;
 
     @Autowired
     private CurrentUser currentUser;
@@ -104,8 +109,19 @@ public class ScoutingReportService {
         return PageResponse.of(result.getContent().stream().map(this::visible).toList(), result);
     }
 
-    // SEARCH reports by words in summary or tags, e.g. "winger"
-    @PreAuthorize("hasAnyRole('ADMIN', 'SCOUT', 'CLUB_MANAGER')")
+    // The signed-in scout's own reports, newest first. Not a search of other scouts' writing.
+    @PreAuthorize("hasRole('SCOUT')")
+    public PageResponse<ScoutingReport> mine(int page, int size) {
+        Scout scout = scoutRepo.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "You don't have a scout profile yet"));
+        return PageResponse.of(reportRepo.findByScoutIdOrderByCreatedAtDesc(
+                scout.getId().toString(), PageRequests.of(page, size)));
+    }
+
+    // SEARCH reports by words in summary or tags, e.g. "winger".
+    // Scouts do not search other people's reports; they use mine() instead.
+    @PreAuthorize("hasAnyRole('ADMIN', 'CLUB_MANAGER')")
     public PageResponse<ScoutingReport> search(String query, int page, int size) {
         if (query == null || query.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Search text is required");

@@ -1,17 +1,51 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { ScoutingReport } from '../../api/types'
+import { useAuth } from '../../auth/AuthContext'
 import { useAssessment } from '../../hooks/useAssessments'
 import { useAthletes } from '../../hooks/useAthletes'
-import { useSearchReports } from '../../hooks/useReports'
+import { useMyReports, useSearchReports } from '../../hooks/useReports'
 import { formatDate } from '../../lib/format'
 import { Icon } from '../../components/Icon'
 import { ScoreBar, ScoreDisplay } from '../../components/ScoreDisplay'
 import { Button, EmptyState, ErrorMessage, PageHeader, Spinner } from '../../components/ui'
 import { DownloadReportButton, ReportView } from '../assessments/ReportSection'
 
-/** Full-text search over report summaries and tags (MongoDB text index on the backend). */
+/**
+ * Admins and club managers search every report.
+ * A scout only sees the reports they wrote, so they download their own work.
+ */
 export default function ReportsPage() {
+  const { hasRole } = useAuth()
+  const ownOnly = hasRole('SCOUT') && !hasRole('ADMIN') && !hasRole('CLUB_MANAGER')
+  return ownOnly ? <MyReports /> : <ReportSearch />
+}
+
+function MyReports() {
+  const results = useMyReports()
+  const athletes = useAthletes()
+  const names = useMemo(() => new Map((athletes.data ?? []).map((a) => [a.id, a.fullName])), [athletes.data])
+
+  return (
+    <>
+      <PageHeader title="Your reports" description="Reports you wrote. Download a PDF of each one." />
+      {results.isPending && <Spinner label="Loading your reports" />}
+      {results.isError && <ErrorMessage error={results.error} />}
+      {results.data?.length === 0 && (
+        <EmptyState title="You have not written a report yet">
+          Open an assessment you recorded and choose Write scouting report.
+        </EmptyState>
+      )}
+      {results.data && results.data.length > 0 && (
+        <ul className="space-y-4">
+          {results.data.map((r) => <ReportResult key={r.id} report={r} athleteName={names.get(r.athleteId)} />)}
+        </ul>
+      )}
+    </>
+  )
+}
+
+function ReportSearch() {
   // The search term lives in the URL (?q=winger), so results survive a refresh and can be shared.
   const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''

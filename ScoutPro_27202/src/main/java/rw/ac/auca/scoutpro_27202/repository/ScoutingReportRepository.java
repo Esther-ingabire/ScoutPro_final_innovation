@@ -16,6 +16,8 @@ public interface ScoutingReportRepository extends MongoRepository<ScoutingReport
 
     Page<ScoutingReport> findByAthleteIdOrderByCreatedAtDesc(String athleteId, Pageable pageable);
 
+    Page<ScoutingReport> findByScoutIdOrderByCreatedAtDesc(String scoutId, Pageable pageable);
+
     // full-text search over summary + tags
     Page<ScoutingReport> findAllBy(TextCriteria criteria, Pageable pageable);
 

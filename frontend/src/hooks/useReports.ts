@@ -18,11 +18,20 @@ export function useAthleteReports(athleteId: string | undefined) {
   })
 }
 
-export function useSearchReports(q: string) {
+export function useSearchReports(q: string, enabled = true) {
   return useQuery({
     queryKey: ['reports', 'search', q],
     queryFn: () => listOf<ScoutingReport>('/reports/search', { q }),
-    enabled: q.trim().length > 0,
+    enabled: enabled && q.trim().length > 0,
+  })
+}
+
+/** Reports written by the signed-in scout. */
+export function useMyReports(enabled = true) {
+  return useQuery({
+    queryKey: ['reports', 'mine'],
+    queryFn: () => listOf<ScoutingReport>('/reports/mine', { size: 50 }),
+    enabled,
   })
 }
 
